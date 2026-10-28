@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { parseDate, type DateValue } from '@internationalized/date'
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 
 type ProjectStatus = 'In progress' | 'In review' | 'Planning'
 type StatusColor = 'primary' | 'warning' | 'neutral'
@@ -19,7 +19,11 @@ interface Project {
 
 const searchQuery = ref('')
 const isCreateModalOpen = ref(false)
+const isDeleteConfirmationOpen = ref(false)
 const isSubmitting = ref(false)
+const editingProjectId = ref<number | null>(null)
+const isEditingProject = computed(() => editingProjectId.value !== null)
+const projectToDelete = ref<Project | null>(null)
 const activeDatePicker = ref<DateField | null>(null)
 const hasAttemptedSubmit = ref(false)
 
@@ -129,6 +133,7 @@ function formatDate(date: string) {
 }
 
 function resetProjectForm() {
+  editingProjectId.value = null
   activeDatePicker.value = null
   projectForm.name = ''
   projectForm.description = ''
@@ -145,10 +150,59 @@ function openCreateModal() {
   isCreateModalOpen.value = true
 }
 
+const openEditProject = (project: Project) => {
+  resetProjectForm()
+  editingProjectId.value = project.id
+  projectForm.name = project.name
+  projectForm.description = project.description
+  projectForm.startDate = project.startDate
+  projectForm.endDate = project.endDate
+  isCreateModalOpen.value = true
+}
+
 function cancelCreateProject() {
   isCreateModalOpen.value = false
   resetProjectForm()
 }
+
+function openDeleteConfirmation(project: Project) {
+  projectToDelete.value = project
+  isDeleteConfirmationOpen.value = true
+}
+
+function cancelDeleteProject() {
+  isDeleteConfirmationOpen.value = false
+  projectToDelete.value = null
+}
+
+function confirmDeleteProject() {
+  const project = projectToDelete.value
+
+  if (!project) {
+    return
+  }
+
+  projects.value = projects.value.filter(currentProject => currentProject.id !== project.id)
+
+  if (editingProjectId.value === project.id) {
+    isCreateModalOpen.value = false
+    resetProjectForm()
+  }
+
+  cancelDeleteProject()
+}
+
+watch(isCreateModalOpen, (isOpen) => {
+  if (!isOpen) {
+    resetProjectForm()
+  }
+})
+
+watch(isDeleteConfirmationOpen, (isOpen) => {
+  if (!isOpen) {
+    projectToDelete.value = null
+  }
+})
 
 async function createProject() {
   hasAttemptedSubmit.value = true
@@ -161,17 +215,37 @@ async function createProject() {
   await nextTick()
 
   try {
-    const nextId = Math.max(0, ...projects.value.map(project => project.id)) + 1
+    if (editingProjectId.value !== null) {
+      const project = projects.value.find(project => project.id === editingProjectId.value)
 
-    projects.value.unshift({
-      id: nextId,
-      name: projectForm.name.trim(),
-      description: projectForm.description.trim(),
-      status: 'Planning',
-      statusColor: 'neutral',
-      startDate: projectForm.startDate,
-      endDate: projectForm.endDate
-    })
+      if (!project) {
+        return
+      }
+
+      Object.assign(project, {
+        name: projectForm.name.trim(),
+        description: projectForm.description.trim(),
+        startDate: projectForm.startDate,
+        endDate: projectForm.endDate
+      })
+
+      const query = searchQuery.value.trim().toLowerCase()
+      if (query && !project.name.toLowerCase().includes(query)) {
+        searchQuery.value = ''
+      }
+    } else {
+      const nextId = Math.max(0, ...projects.value.map(project => project.id)) + 1
+
+      projects.value.unshift({
+        id: nextId,
+        name: projectForm.name.trim(),
+        description: projectForm.description.trim(),
+        status: 'Planning',
+        statusColor: 'neutral',
+        startDate: projectForm.startDate,
+        endDate: projectForm.endDate
+      })
+    }
 
     isCreateModalOpen.value = false
     resetProjectForm()
@@ -246,13 +320,38 @@ async function createProject() {
               </p>
             </div>
           </div>
-          <UBadge
-            :color="project.statusColor"
-            variant="subtle"
-            class="shrink-0"
-          >
-            {{ project.status }}
-          </UBadge>
+          <div class="flex shrink-0 flex-col items-end gap-2">
+            <UBadge
+              :color="project.statusColor"
+              variant="subtle"
+            >
+              {{ project.status }}
+            </UBadge>
+            <UTooltip text="Edit project">
+              <UButton
+                :aria-label="`Edit ${project.name}`"
+                icon="i-lucide-pencil"
+                color="neutral"
+                variant="ghost"
+                size="md"
+                square
+                class="size-9 shrink-0"
+                @click="openEditProject(project)"
+              />
+            </UTooltip>
+            <UTooltip text="Delete project">
+              <UButton
+                :aria-label="`Delete ${project.name}`"
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                size="md"
+                square
+                class="size-9 shrink-0 hover:bg-error/10"
+                @click="openDeleteConfirmation(project)"
+              />
+            </UTooltip>
+          </div>
         </div>
 
         <div class="mt-6 grid grid-cols-2 gap-4 border-t border-default pt-4">
@@ -300,8 +399,8 @@ async function createProject() {
 
     <UModal
       v-model:open="isCreateModalOpen"
-      title="New project"
-      description="Add project details and choose dates from the calendars."
+      :title="isEditingProject ? 'Edit project' : 'New project'"
+      :description="isEditingProject ? 'Update the project details and dates.' : 'Add project details and choose dates from the calendars.'"
       class="w-[calc(100%-2rem)] max-w-4xl"
       scrollable
     >
@@ -507,12 +606,43 @@ async function createProject() {
             @click="cancelCreateProject"
           />
           <UButton
-            label="Create project"
+            :label="isEditingProject ? 'Save changes' : 'Create project'"
             type="submit"
             form="create-project-form"
             color="primary"
             :disabled="!isFormValid || isSubmitting"
             :loading="isSubmitting"
+          />
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      v-model:open="isDeleteConfirmationOpen"
+      title="Delete project?"
+      description="This action will remove the project from your list."
+      class="w-[calc(100%-2rem)] max-w-md"
+    >
+      <template #body>
+        <p class="text-sm text-muted">
+          Are you sure you want to delete <span class="font-semibold text-highlighted">{{ projectToDelete?.name }}</span>?
+        </p>
+      </template>
+
+      <template #footer>
+        <div class="flex w-full justify-end gap-3">
+          <UButton
+            label="Cancel"
+            color="neutral"
+            variant="ghost"
+            @click="cancelDeleteProject"
+          />
+          <UButton
+            label="Delete project"
+            color="error"
+            icon="i-lucide-trash-2"
+            :disabled="!projectToDelete"
+            @click="confirmDeleteProject"
           />
         </div>
       </template>
