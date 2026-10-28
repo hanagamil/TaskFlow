@@ -4,8 +4,24 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 
 type ProjectStatus = 'In progress' | 'In review' | 'Planning'
 type StatusColor = 'primary' | 'warning' | 'neutral'
-type ProjectField = 'name' | 'startDate' | 'endDate'
+type ProjectField = 'name' | 'startDate' | 'endDate' | 'status'
 type DateField = 'startDate' | 'endDate'
+
+const projectStatusOptions: { label: ProjectStatus, value: ProjectStatus }[] = [
+  { label: 'Planning', value: 'Planning' },
+  { label: 'In progress', value: 'In progress' },
+  { label: 'In review', value: 'In review' }
+]
+
+const projectStatusColors: Record<ProjectStatus, StatusColor> = {
+  'Planning': 'neutral',
+  'In progress': 'primary',
+  'In review': 'warning'
+}
+
+function isProjectStatus(status: string): status is ProjectStatus {
+  return projectStatusOptions.some(option => option.value === status)
+}
 
 interface Project {
   id: number
@@ -32,13 +48,22 @@ const projectForm = reactive({
   name: '',
   description: '',
   startDate: '',
-  endDate: ''
+  endDate: '',
+  status: 'Planning' as ProjectStatus | ''
+})
+
+const projectStatusSelection = computed<ProjectStatus | undefined>({
+  get: () => isProjectStatus(projectForm.status) ? projectForm.status : undefined,
+  set: (status) => {
+    projectForm.status = status ?? ''
+  }
 })
 
 const touched = reactive<Record<ProjectField, boolean>>({
   name: false,
   startDate: false,
-  endDate: false
+  endDate: false,
+  status: false
 })
 
 const projects = ref<Project[]>([
@@ -105,6 +130,7 @@ const isEndDatePickerOpen = computed({
 
 const errors = computed(() => ({
   name: projectForm.name.trim() ? '' : 'Enter a project name.',
+  status: isProjectStatus(projectForm.status) ? '' : 'Choose a project status.',
   startDate: projectForm.startDate ? '' : 'Choose a start date.',
   endDate: !projectForm.endDate
     ? 'Choose an end date.'
@@ -140,9 +166,11 @@ function resetProjectForm() {
   projectForm.description = ''
   projectForm.startDate = ''
   projectForm.endDate = ''
+  projectForm.status = 'Planning'
   touched.name = false
   touched.startDate = false
   touched.endDate = false
+  touched.status = false
   hasAttemptedSubmit.value = false
 }
 
@@ -158,6 +186,7 @@ const openEditProject = (project: Project) => {
   projectForm.description = project.description
   projectForm.startDate = project.startDate
   projectForm.endDate = project.endDate
+  projectForm.status = project.status
   isCreateModalOpen.value = true
 }
 
@@ -212,8 +241,9 @@ watch(isDeleteConfirmationOpen, (isOpen) => {
 
 async function createProject() {
   hasAttemptedSubmit.value = true
+  const selectedStatus = projectForm.status
 
-  if (!isFormValid.value || isSubmitting.value) {
+  if (!isFormValid.value || isSubmitting.value || !isProjectStatus(selectedStatus)) {
     return
   }
 
@@ -234,6 +264,8 @@ async function createProject() {
       Object.assign(project, {
         name: projectForm.name.trim(),
         description: projectForm.description.trim(),
+        status: selectedStatus,
+        statusColor: projectStatusColors[selectedStatus],
         startDate: projectForm.startDate,
         endDate: projectForm.endDate
       })
@@ -249,8 +281,8 @@ async function createProject() {
         id: nextId,
         name: projectForm.name.trim(),
         description: projectForm.description.trim(),
-        status: 'Planning',
-        statusColor: 'neutral',
+        status: selectedStatus,
+        statusColor: projectStatusColors[selectedStatus],
         startDate: projectForm.startDate,
         endDate: projectForm.endDate
       })
@@ -452,19 +484,48 @@ async function createProject() {
             </p>
           </div>
 
-          <div>
-            <label
-              for="project-description"
-              class="mb-1.5 block text-sm font-medium text-highlighted"
-            >
-              Description <span class="text-muted">(optional)</span>
-            </label>
-            <UTextarea
-              id="project-description"
-              v-model="projectForm.description"
-              placeholder="What is this project about?"
-              :rows="3"
-            />
+          <div class="grid gap-6 lg:grid-cols-2">
+            <div>
+              <label
+                for="project-description"
+                class="mb-1.5 block text-sm font-medium text-highlighted"
+              >
+                Description <span class="text-muted">(optional)</span>
+              </label>
+              <UTextarea
+                id="project-description"
+                v-model="projectForm.description"
+                placeholder="What is this project about?"
+                :rows="3"
+              />
+            </div>
+
+            <div>
+              <label
+                for="project-status"
+                class="mb-1.5 block text-sm font-medium text-highlighted"
+              >
+                Project status <span aria-hidden="true">*</span>
+              </label>
+              <USelect
+                id="project-status"
+                v-model="projectStatusSelection"
+                :items="projectStatusOptions"
+                required
+                :aria-invalid="shouldShowError('status') && Boolean(errors.status)"
+                :aria-describedby="shouldShowError('status') && errors.status ? 'project-status-error' : undefined"
+                class="w-full"
+                @blur="touched.status = true"
+              />
+              <p
+                v-if="shouldShowError('status') && errors.status"
+                id="project-status-error"
+                class="mt-1.5 text-sm text-error"
+                role="alert"
+              >
+                {{ errors.status }}
+              </p>
+            </div>
           </div>
 
           <div class="grid gap-6 lg:grid-cols-2">
