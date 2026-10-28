@@ -38,7 +38,11 @@ const draggedTaskId = ref<number | null>(null)
 const activeDropStatus = ref<TaskStatus | null>(null)
 const dragBoardRevision = ref(0)
 const toast = useToast()
-const isCreateTaskModalOpen = ref(false)
+const isTaskModalOpen = ref(false)
+const isDeleteTaskConfirmationOpen = ref(false)
+const taskToDeleteId = ref<number | null>(null)
+const editingTaskId = ref<number | null>(null)
+const isEditingTask = computed(() => editingTaskId.value !== null)
 const isTaskSubmitting = ref(false)
 const hasAttemptedTaskSubmit = ref(false)
 const isTaskDueDatePickerOpen = ref(false)
@@ -106,6 +110,7 @@ function shouldShowTaskError(field: keyof typeof touchedTaskFields) {
 }
 
 function resetTaskForm() {
+  editingTaskId.value = null
   taskForm.name = ''
   taskForm.description = ''
   taskForm.project = ''
@@ -121,21 +126,31 @@ function resetTaskForm() {
 
 function openCreateTaskModal() {
   resetTaskForm()
-  isCreateTaskModalOpen.value = true
+  isTaskModalOpen.value = true
 }
 
-function createTask() {
+function openEditTask(task: Task) {
+  resetTaskForm()
+  editingTaskId.value = task.id
+  taskForm.name = task.name
+  taskForm.description = task.description
+  taskForm.project = task.project
+  taskForm.dueDate = task.dueDate
+  taskForm.status = task.status
+  isTaskModalOpen.value = true
+}
+
+function submitTask() {
   hasAttemptedTaskSubmit.value = true
 
-  if (!isTaskFormValid.value) {
+  if (!isTaskFormValid.value || isTaskSubmitting.value) {
     return
   }
 
   isTaskSubmitting.value = true
 
   try {
-    const task: Task = {
-      id: Math.max(0, ...tasks.value.map(existingTask => existingTask.id)) + 1,
+    const taskData = {
       name: taskForm.name.trim(),
       description: taskForm.description.trim(),
       project: taskForm.project,
@@ -143,17 +158,46 @@ function createTask() {
       status: taskForm.status
     }
 
+    if (editingTaskId.value !== null) {
+      const task = tasks.value.find(existingTask => existingTask.id === editingTaskId.value)
+
+      if (!task) {
+        throw new Error('The task no longer exists.')
+      }
+
+      Object.assign(task, taskData)
+      activeMobileStatus.value = task.status
+
+      const query = searchQuery.value.trim().toLowerCase()
+      if (query && !task.name.toLowerCase().includes(query)) {
+        searchQuery.value = ''
+      }
+
+      isTaskModalOpen.value = false
+      toast.add({
+        title: 'Task updated',
+        description: task.name + ' was updated successfully.',
+        color: 'success'
+      })
+      return
+    }
+
+    const task: Task = {
+      id: Math.max(0, ...tasks.value.map(existingTask => existingTask.id)) + 1,
+      ...taskData
+    }
+
     tasks.value.unshift(task)
     activeMobileStatus.value = task.status
-    isCreateTaskModalOpen.value = false
+    isTaskModalOpen.value = false
     toast.add({
       title: 'Task created',
-      description: `${task.name} was added to ${task.status}.`,
+      description: task.name + ' was created successfully.',
       color: 'success'
     })
   } catch {
     toast.add({
-      title: 'Task could not be created',
+      title: isEditingTask.value ? 'Task could not be updated' : 'Task could not be created',
       description: 'Please review the task details and try again.',
       color: 'error'
     })
@@ -162,9 +206,53 @@ function createTask() {
   }
 }
 
-watch(isCreateTaskModalOpen, (isOpen) => {
+watch(isTaskModalOpen, (isOpen) => {
   if (!isOpen) {
     resetTaskForm()
+  }
+})
+
+function openDeleteTaskConfirmation(task: Task) {
+  taskToDeleteId.value = task.id
+  isDeleteTaskConfirmationOpen.value = true
+}
+
+function cancelDeleteTask() {
+  isDeleteTaskConfirmationOpen.value = false
+  taskToDeleteId.value = null
+}
+
+function confirmDeleteTask() {
+  const taskId = taskToDeleteId.value
+
+  if (!isDeleteTaskConfirmationOpen.value || taskId === null) {
+    return
+  }
+
+  const task = tasks.value.find(currentTask => currentTask.id === taskId)
+
+  if (!task) {
+    cancelDeleteTask()
+    toast.add({
+      title: 'Task could not be deleted',
+      description: 'This task is no longer available in the list.',
+      color: 'error'
+    })
+    return
+  }
+
+  tasks.value = tasks.value.filter(currentTask => currentTask.id !== taskId)
+  cancelDeleteTask()
+  toast.add({
+    title: 'Task deleted',
+    description: task.name + ' was deleted successfully.',
+    color: 'success'
+  })
+}
+
+watch(isDeleteTaskConfirmationOpen, (isOpen) => {
+  if (!isOpen) {
+    taskToDeleteId.value = null
   }
 })
 const tasks = ref<Task[]>([
@@ -217,6 +305,10 @@ const tasks = ref<Task[]>([
     status: 'Done'
   }
 ])
+
+const taskToDelete = computed(() => taskToDeleteId.value === null
+  ? null
+  : tasks.value.find(task => task.id === taskToDeleteId.value) ?? null)
 
 const filteredTasks = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -420,7 +512,8 @@ function handleDragEnd() {
             :animation="180"
             :sort="false"
             draggable="[data-draggable-task]"
-            filter="[data-column-empty]"
+            filter="button, [data-column-empty]"
+            :prevent-on-filter="false"
             ghost-class="opacity-40"
             chosen-class="task-drag-chosen"
             drag-class="shadow-lg"
@@ -439,21 +532,51 @@ function handleDragEnd() {
                 data-draggable-task
                 class="border border-default shadow-sm"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <h3 class="min-w-0 font-medium text-highlighted">
-                    {{ task.name }}
-                  </h3>
-                  <UBadge
-                    :color="column.color"
-                    variant="subtle"
-                    class="shrink-0"
-                  >
-                    {{ task.status }}
-                  </UBadge>
+                <div class="flex items-start justify-between gap-4">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex min-w-0 items-start justify-between gap-3">
+                      <h3 class="min-w-0 flex-1 truncate font-medium text-highlighted">
+                        {{ task.name }}
+                      </h3>
+                      <UBadge
+                        :color="column.color"
+                        variant="subtle"
+                        class="shrink-0"
+                      >
+                        {{ task.status }}
+                      </UBadge>
+                    </div>
+                    <p class="mt-2 break-words text-sm leading-relaxed text-muted">
+                      {{ task.description }}
+                    </p>
+                  </div>
+                  <div class="flex shrink-0 flex-col items-end gap-2">
+                    <UTooltip text="Edit task">
+                      <UButton
+                        :aria-label="'Edit ' + task.name"
+                        icon="i-lucide-pencil"
+                        color="neutral"
+                        variant="ghost"
+                        size="md"
+                        square
+                        class="size-9 shrink-0"
+                        @click="openEditTask(task)"
+                      />
+                    </UTooltip>
+                    <UTooltip text="Delete task">
+                      <UButton
+                        :aria-label="'Delete ' + task.name"
+                        icon="i-lucide-trash-2"
+                        color="error"
+                        variant="ghost"
+                        size="md"
+                        square
+                        class="size-9 shrink-0 hover:bg-error/10"
+                        @click="openDeleteTaskConfirmation(task)"
+                      />
+                    </UTooltip>
+                  </div>
                 </div>
-                <p class="mt-2 text-sm leading-relaxed text-muted">
-                  {{ task.description }}
-                </p>
                 <div class="mt-4 flex flex-col gap-2 border-t border-default pt-3 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
                   <span class="flex min-w-0 items-center gap-1.5">
                     <UIcon
@@ -559,14 +682,42 @@ function handleDragEnd() {
               :key="task.id"
               class="border border-default shadow-sm"
             >
-              <div class="flex items-start justify-between gap-3">
-                <h3 class="min-w-0 font-medium text-highlighted">
-                  {{ task.name }}
-                </h3>
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 flex-1">
+                  <h3 class="truncate font-medium text-highlighted">
+                    {{ task.name }}
+                  </h3>
+                  <p class="mt-2 break-words text-sm leading-relaxed text-muted">
+                    {{ task.description }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 flex-col items-end gap-2">
+                  <UTooltip text="Edit task">
+                    <UButton
+                      :aria-label="'Edit ' + task.name"
+                      icon="i-lucide-pencil"
+                      color="neutral"
+                      variant="ghost"
+                      size="md"
+                      square
+                      class="size-9 shrink-0"
+                      @click="openEditTask(task)"
+                    />
+                  </UTooltip>
+                  <UTooltip text="Delete task">
+                    <UButton
+                      :aria-label="'Delete ' + task.name"
+                      icon="i-lucide-trash-2"
+                      color="error"
+                      variant="ghost"
+                      size="md"
+                      square
+                      class="size-9 shrink-0 hover:bg-error/10"
+                      @click="openDeleteTaskConfirmation(task)"
+                    />
+                  </UTooltip>
+                </div>
               </div>
-              <p class="mt-2 text-sm leading-relaxed text-muted">
-                {{ task.description }}
-              </p>
               <div class="mt-4 flex flex-col gap-2 border-t border-default pt-3 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
                 <span class="flex min-w-0 items-center gap-1.5">
                   <UIcon
@@ -622,18 +773,18 @@ function handleDragEnd() {
     </section>
 
     <UModal
-      v-model:open="isCreateTaskModalOpen"
-      title="New task"
-      description="Add task details and choose a due date from the calendar."
+      v-model:open="isTaskModalOpen"
+      :title="isEditingTask ? 'Edit task' : 'New task'"
+      :description="isEditingTask ? 'Update the task details and due date.' : 'Add task details and choose a due date from the calendar.'"
       class="w-[calc(100%-2rem)] max-w-2xl"
       scrollable
     >
       <template #body>
         <form
-          id="create-task-form"
+          id="task-form"
           class="space-y-5"
           novalidate
-          @submit.prevent="createTask"
+          @submit.prevent="submitTask"
         >
           <div>
             <label
@@ -801,15 +952,46 @@ function handleDragEnd() {
             color="neutral"
             variant="ghost"
             :disabled="isTaskSubmitting"
-            @click="isCreateTaskModalOpen = false"
+            @click="isTaskModalOpen = false"
           />
           <UButton
-            label="Create task"
+            :label="isEditingTask ? 'Save changes' : 'Create task'"
             type="submit"
-            form="create-task-form"
+            form="task-form"
             color="primary"
             :disabled="!isTaskFormValid || isTaskSubmitting"
             :loading="isTaskSubmitting"
+          />
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      v-model:open="isDeleteTaskConfirmationOpen"
+      title="Delete task?"
+      description="This action will remove the task from your board."
+      class="w-[calc(100%-2rem)] max-w-md"
+    >
+      <template #body>
+        <p class="text-sm text-muted">
+          Are you sure you want to delete <span class="font-semibold text-highlighted">{{ taskToDelete?.name ?? 'this task' }}</span>?
+        </p>
+      </template>
+
+      <template #footer>
+        <div class="flex w-full justify-end gap-3">
+          <UButton
+            label="Cancel"
+            color="neutral"
+            variant="ghost"
+            @click="cancelDeleteTask"
+          />
+          <UButton
+            label="Delete task"
+            color="error"
+            icon="i-lucide-trash-2"
+            :disabled="!taskToDelete"
+            @click="confirmDeleteTask"
           />
         </div>
       </template>

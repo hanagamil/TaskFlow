@@ -17,6 +17,7 @@ interface Project {
   endDate: string
 }
 
+const toast = useToast()
 const searchQuery = ref('')
 const isCreateModalOpen = ref(false)
 const isDeleteConfirmationOpen = ref(false)
@@ -190,6 +191,11 @@ function confirmDeleteProject() {
   }
 
   cancelDeleteProject()
+  toast.add({
+    title: 'Project deleted',
+    description: project.name + ' was deleted successfully.',
+    color: 'success'
+  })
 }
 
 watch(isCreateModalOpen, (isOpen) => {
@@ -215,6 +221,9 @@ async function createProject() {
   await nextTick()
 
   try {
+    const isEditing = editingProjectId.value !== null
+    const projectName = projectForm.name.trim()
+
     if (editingProjectId.value !== null) {
       const project = projects.value.find(project => project.id === editingProjectId.value)
 
@@ -249,6 +258,11 @@ async function createProject() {
 
     isCreateModalOpen.value = false
     resetProjectForm()
+    toast.add({
+      title: isEditing ? 'Project updated' : 'Project created',
+      description: projectName + (isEditing ? ' was updated successfully.' : ' was created successfully.'),
+      color: 'success'
+    })
   } finally {
     isSubmitting.value = false
   }
