@@ -19,24 +19,47 @@ const navigation = [
       :class="isSidebarCollapsed ? 'w-20' : 'w-64'"
     >
       <div class="flex h-16 shrink-0 items-center border-b border-default px-4">
-        <NuxtLink to="/" class="flex min-w-0 items-center gap-3 font-semibold text-highlighted">
+        <NuxtLink
+          to="/"
+          class="flex min-w-0 items-center gap-3 font-semibold text-highlighted"
+        >
           <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
-            <UIcon name="i-lucide-check-check" class="size-5" />
+            <UIcon
+              name="i-lucide-check-check"
+              class="size-5"
+            />
           </span>
-          <span v-if="!isSidebarCollapsed" class="truncate">TaskFlow</span>
+          <span
+            v-if="!isSidebarCollapsed"
+            class="truncate"
+          >TaskFlow</span>
         </NuxtLink>
       </div>
 
-      <nav id="desktop-navigation" aria-label="Main navigation" class="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-        <template v-for="item in navigation" :key="item.to">
-          <UTooltip v-if="isSidebarCollapsed" :text="item.label" side="right">
+      <nav
+        id="desktop-navigation"
+        aria-label="Main navigation"
+        class="min-h-0 flex-1 space-y-1 overflow-y-auto p-3"
+      >
+        <template
+          v-for="item in navigation"
+          :key="item.to"
+        >
+          <UTooltip
+            v-if="isSidebarCollapsed"
+            :text="item.label"
+            side="right"
+          >
             <NuxtLink
               :to="item.to"
               :aria-label="item.label"
               active-class="bg-primary/10 text-primary"
               class="flex h-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-accented hover:text-highlighted"
             >
-              <UIcon :name="item.icon" class="size-5" />
+              <UIcon
+                :name="item.icon"
+                class="size-5"
+              />
             </NuxtLink>
           </UTooltip>
           <NuxtLink
@@ -45,7 +68,10 @@ const navigation = [
             active-class="bg-primary/10 text-primary"
             class="flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-muted transition-colors hover:bg-accented hover:text-highlighted"
           >
-            <UIcon :name="item.icon" class="size-5 shrink-0" />
+            <UIcon
+              :name="item.icon"
+              class="size-5 shrink-0"
+            />
             <span>{{ item.label }}</span>
           </NuxtLink>
         </template>
@@ -92,9 +118,16 @@ const navigation = [
       </main>
     </div>
 
-    <UDrawer v-model:open="isMobileMenuOpen" title="TaskFlow" direction="left">
+    <UDrawer
+      v-model:open="isMobileMenuOpen"
+      title="TaskFlow"
+      direction="left"
+    >
       <template #body>
-        <nav aria-label="Main navigation" class="space-y-1">
+        <nav
+          aria-label="Main navigation"
+          class="space-y-1"
+        >
           <NuxtLink
             v-for="item in navigation"
             :key="item.to"
@@ -103,7 +136,10 @@ const navigation = [
             class="flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-muted transition-colors hover:bg-accented hover:text-highlighted"
             @click="isMobileMenuOpen = false"
           >
-            <UIcon :name="item.icon" class="size-5 shrink-0" />
+            <UIcon
+              :name="item.icon"
+              class="size-5 shrink-0"
+            />
             <span>{{ item.label }}</span>
           </NuxtLink>
         </nav>
