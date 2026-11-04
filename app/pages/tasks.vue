@@ -3,17 +3,9 @@ import Draggable from 'vuedraggable'
 import { parseDate, type DateValue } from '@internationalized/date'
 import { computed, reactive, ref, watch } from 'vue'
 
-type TaskStatus = 'To Do' | 'In Progress' | 'Done'
-type StatusColor = 'neutral' | 'info' | 'success'
+import type { Task, TaskStatus } from '~/types/task'
 
-interface Task {
-  id: number
-  name: string
-  description: string
-  project: string
-  dueDate: string
-  status: TaskStatus
-}
+type StatusColor = 'neutral' | 'info' | 'success'
 
 interface TaskColumn {
   id: string
@@ -32,6 +24,7 @@ interface SortableChangeEvent {
   }
 }
 
+const { projects, tasks } = useTaskFlowData()
 const searchQuery = ref('')
 const activeMobileStatus = ref<TaskStatus>('To Do')
 const draggedTaskId = ref<number | null>(null)
@@ -51,7 +44,7 @@ const touchedTaskFields = reactive({ name: false, project: false, dueDate: false
 const taskForm = reactive({
   name: '',
   description: '',
-  project: '',
+  projectId: undefined as number | undefined,
   dueDate: '',
   status: 'To Do' as TaskStatus
 })
@@ -85,9 +78,14 @@ const statusDotClasses: Record<TaskStatus, string> = {
   'Done': 'bg-success'
 }
 
-const projectOptions = computed(() => [...new Set(tasks.value.map(task => task.project))])
-const projectSelectOptions = computed(() => projectOptions.value.map(project => ({ label: project, value: project })))
+const projectSelectOptions = computed(() => projects.value.map(project => ({
+  label: project.name,
+  value: project.id
+})))
 
+function getProjectName(projectId: number) {
+  return projects.value.find(project => project.id === projectId)?.name ?? 'Unknown project'
+}
 const taskDueDateCalendarValue = computed<DateValue | undefined>({
   get: () => taskForm.dueDate ? parseDate(taskForm.dueDate) : undefined,
   set: (date) => {
@@ -99,7 +97,7 @@ const taskDueDateCalendarValue = computed<DateValue | undefined>({
 
 const taskFormErrors = computed(() => ({
   name: taskForm.name.trim() ? '' : 'Enter a task name.',
-  project: projectOptions.value.includes(taskForm.project) ? '' : 'Choose a project.',
+  project: projects.value.some(project => project.id === taskForm.projectId) ? '' : 'Choose a project.',
   dueDate: taskForm.dueDate ? '' : 'Choose a due date.'
 }))
 
@@ -113,7 +111,7 @@ function resetTaskForm() {
   editingTaskId.value = null
   taskForm.name = ''
   taskForm.description = ''
-  taskForm.project = ''
+  taskForm.projectId = undefined
   taskForm.dueDate = ''
   taskForm.status = 'To Do'
   touchedTaskFields.name = false
@@ -134,7 +132,7 @@ function openEditTask(task: Task) {
   editingTaskId.value = task.id
   taskForm.name = task.name
   taskForm.description = task.description
-  taskForm.project = task.project
+  taskForm.projectId = task.projectId
   taskForm.dueDate = task.dueDate
   taskForm.status = task.status
   isTaskModalOpen.value = true
@@ -143,7 +141,9 @@ function openEditTask(task: Task) {
 function submitTask() {
   hasAttemptedTaskSubmit.value = true
 
-  if (!isTaskFormValid.value || isTaskSubmitting.value) {
+  const selectedProjectId = taskForm.projectId
+
+  if (!isTaskFormValid.value || isTaskSubmitting.value || selectedProjectId === undefined || !projects.value.some(project => project.id === selectedProjectId)) {
     return
   }
 
@@ -153,7 +153,7 @@ function submitTask() {
     const taskData = {
       name: taskForm.name.trim(),
       description: taskForm.description.trim(),
-      project: taskForm.project,
+      projectId: selectedProjectId,
       dueDate: taskForm.dueDate,
       status: taskForm.status
     }
@@ -255,57 +255,6 @@ watch(isDeleteTaskConfirmationOpen, (isOpen) => {
     taskToDeleteId.value = null
   }
 })
-const tasks = ref<Task[]>([
-  {
-    id: 1,
-    name: 'Prepare project brief',
-    description: 'Gather requirements and outline the project goals.',
-    project: 'Brand identity refresh',
-    dueDate: '2026-11-02',
-    status: 'To Do'
-  },
-  {
-    id: 2,
-    name: 'Review launch checklist',
-    description: 'Confirm the remaining items before the campaign goes live.',
-    project: 'Q4 marketing site',
-    dueDate: '2026-11-05',
-    status: 'To Do'
-  },
-  {
-    id: 3,
-    name: 'Design dashboard wireframes',
-    description: 'Map the main screens for the client portal experience.',
-    project: 'Client portal redesign',
-    dueDate: '2026-10-30',
-    status: 'In Progress'
-  },
-  {
-    id: 4,
-    name: 'Create brand color palette',
-    description: 'Explore a flexible palette for digital and print use.',
-    project: 'Brand identity refresh',
-    dueDate: '2026-11-01',
-    status: 'In Progress'
-  },
-  {
-    id: 5,
-    name: 'Collect client feedback',
-    description: 'Summarize notes from the latest design review.',
-    project: 'Client portal redesign',
-    dueDate: '2026-10-26',
-    status: 'Done'
-  },
-  {
-    id: 6,
-    name: 'Draft homepage copy',
-    description: 'Prepare first-pass copy for the campaign homepage.',
-    project: 'Q4 marketing site',
-    dueDate: '2026-10-24',
-    status: 'Done'
-  }
-])
-
 const taskToDelete = computed(() => taskToDeleteId.value === null
   ? null
   : tasks.value.find(task => task.id === taskToDeleteId.value) ?? null)
@@ -584,7 +533,7 @@ function handleDragEnd() {
                       class="size-4 shrink-0"
                       aria-hidden="true"
                     />
-                    <span class="truncate">{{ task.project }}</span>
+                    <span class="truncate">{{ getProjectName(task.projectId) }}</span>
                   </span>
                   <time
                     :datetime="task.dueDate"
@@ -725,7 +674,7 @@ function handleDragEnd() {
                     class="size-4 shrink-0"
                     aria-hidden="true"
                   />
-                  <span class="truncate">{{ task.project }}</span>
+                  <span class="truncate">{{ getProjectName(task.projectId) }}</span>
                 </span>
                 <time
                   :datetime="task.dueDate"
@@ -837,7 +786,7 @@ function handleDragEnd() {
             </label>
             <USelect
               id="task-project"
-              v-model="taskForm.project"
+              v-model="taskForm.projectId"
               :items="projectSelectOptions"
               placeholder="Select a project"
               required

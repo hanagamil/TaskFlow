@@ -2,8 +2,8 @@
 import { parseDate, type DateValue } from '@internationalized/date'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 
-type ProjectStatus = 'In progress' | 'In review' | 'Planning'
-type StatusColor = 'primary' | 'warning' | 'neutral'
+import type { Project, ProjectStatus } from '~/types/project'
+
 type ProjectField = 'name' | 'startDate' | 'endDate' | 'status'
 type DateField = 'startDate' | 'endDate'
 
@@ -13,7 +13,7 @@ const projectStatusOptions: { label: ProjectStatus, value: ProjectStatus }[] = [
   { label: 'In review', value: 'In review' }
 ]
 
-const projectStatusColors: Record<ProjectStatus, StatusColor> = {
+const projectStatusColors: Record<ProjectStatus, 'primary' | 'warning' | 'neutral'> = {
   'Planning': 'neutral',
   'In progress': 'primary',
   'In review': 'warning'
@@ -22,17 +22,7 @@ const projectStatusColors: Record<ProjectStatus, StatusColor> = {
 function isProjectStatus(status: string): status is ProjectStatus {
   return projectStatusOptions.some(option => option.value === status)
 }
-
-interface Project {
-  id: number
-  name: string
-  description: string
-  status: ProjectStatus
-  statusColor: StatusColor
-  startDate: string
-  endDate: string
-}
-
+const { projects, tasks } = useTaskFlowData()
 const toast = useToast()
 const searchQuery = ref('')
 const isCreateModalOpen = ref(false)
@@ -65,36 +55,6 @@ const touched = reactive<Record<ProjectField, boolean>>({
   endDate: false,
   status: false
 })
-
-const projects = ref<Project[]>([
-  {
-    id: 1,
-    name: 'Brand identity refresh',
-    description: 'A refreshed visual identity and brand system for a growing local business.',
-    status: 'In progress',
-    statusColor: 'primary',
-    startDate: '2026-08-15',
-    endDate: '2026-11-20'
-  },
-  {
-    id: 2,
-    name: 'Client portal redesign',
-    description: 'A clearer, more useful client portal experience across desktop and mobile.',
-    status: 'In review',
-    statusColor: 'warning',
-    startDate: '2026-09-01',
-    endDate: '2026-12-05'
-  },
-  {
-    id: 3,
-    name: 'Q4 marketing site',
-    description: 'A campaign website to introduce the upcoming product release.',
-    status: 'Planning',
-    statusColor: 'neutral',
-    startDate: '2026-10-20',
-    endDate: '2026-12-18'
-  }
-])
 
 const startDateCalendarValue = computed<DateValue | undefined>({
   get: () => projectForm.startDate ? parseDate(projectForm.startDate) : undefined,
@@ -212,7 +172,9 @@ function confirmDeleteProject() {
     return
   }
 
+  const associatedTaskCount = tasks.value.filter(task => task.projectId === project.id).length
   projects.value = projects.value.filter(currentProject => currentProject.id !== project.id)
+  tasks.value = tasks.value.filter(task => task.projectId !== project.id)
 
   if (editingProjectId.value === project.id) {
     isCreateModalOpen.value = false
@@ -222,11 +184,12 @@ function confirmDeleteProject() {
   cancelDeleteProject()
   toast.add({
     title: 'Project deleted',
-    description: project.name + ' was deleted successfully.',
+    description: associatedTaskCount > 0
+      ? project.name + ' and its ' + associatedTaskCount + ' associated task(s) were deleted successfully.'
+      : project.name + ' was deleted successfully.',
     color: 'success'
   })
 }
-
 watch(isCreateModalOpen, (isOpen) => {
   if (!isOpen) {
     resetProjectForm()
@@ -265,7 +228,6 @@ async function createProject() {
         name: projectForm.name.trim(),
         description: projectForm.description.trim(),
         status: selectedStatus,
-        statusColor: projectStatusColors[selectedStatus],
         startDate: projectForm.startDate,
         endDate: projectForm.endDate
       })
@@ -282,7 +244,6 @@ async function createProject() {
         name: projectForm.name.trim(),
         description: projectForm.description.trim(),
         status: selectedStatus,
-        statusColor: projectStatusColors[selectedStatus],
         startDate: projectForm.startDate,
         endDate: projectForm.endDate
       })
@@ -368,7 +329,7 @@ async function createProject() {
           </div>
           <div class="flex shrink-0 flex-col items-end gap-2">
             <UBadge
-              :color="project.statusColor"
+              :color="projectStatusColors[project.status]"
               variant="subtle"
             >
               {{ project.status }}
@@ -695,7 +656,7 @@ async function createProject() {
     <UModal
       v-model:open="isDeleteConfirmationOpen"
       title="Delete project?"
-      description="This action will remove the project from your list."
+      description="Deleting this project will also delete all tasks assigned to it."
       class="w-[calc(100%-2rem)] max-w-md"
     >
       <template #body>

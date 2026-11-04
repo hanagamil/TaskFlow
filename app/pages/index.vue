@@ -1,137 +1,68 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
-type ProjectStatus = 'In progress' | 'In review' | 'Planning'
+import type { ProjectStatus } from '~/types/project'
+
 type StatusColor = 'primary' | 'warning' | 'neutral'
-type TaskStatus = 'To Do' | 'In Progress' | 'Done'
 
-interface Project {
-  id: number
-  name: string
-  description: string
-  status: ProjectStatus
-  statusColor: StatusColor
-  startDate: string
-  endDate: string
+const projectStatusColors: Record<ProjectStatus, StatusColor> = {
+  'Planning': 'neutral',
+  'In progress': 'primary',
+  'In review': 'warning'
 }
 
-interface Task {
-  id: number
-  name: string
-  description: string
-  project: string
-  dueDate: string
-  status: TaskStatus
+const { projects, tasks } = useTaskFlowData()
+const today = ref('')
+const nextWeek = ref('')
+
+function formatDateKey(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
 }
 
-interface UpcomingTask {
-  name: string
-  project: string
-  dueDate: string
+function formatDate(date: string) {
+  return `${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`
 }
 
-const projects: Project[] = [
-  {
-    id: 1,
-    name: 'Brand identity refresh',
-    description: 'A refreshed visual identity and brand system for a growing local business.',
-    status: 'In progress',
-    statusColor: 'primary',
-    startDate: '2026-08-15',
-    endDate: '2026-11-20'
-  },
-  {
-    id: 2,
-    name: 'Client portal redesign',
-    description: 'A clearer, more useful client portal experience across desktop and mobile.',
-    status: 'In review',
-    statusColor: 'warning',
-    startDate: '2026-09-01',
-    endDate: '2026-12-05'
-  },
-  {
-    id: 3,
-    name: 'Q4 marketing site',
-    description: 'A campaign website to introduce the upcoming product release.',
-    status: 'Planning',
-    statusColor: 'neutral',
-    startDate: '2026-10-20',
-    endDate: '2026-12-18'
-  }
-]
+function getProjectName(projectId: number) {
+  return projects.value.find(project => project.id === projectId)?.name ?? 'Unknown project'
+}
 
-const tasks: Task[] = [
-  {
-    id: 1,
-    name: 'Prepare project brief',
-    description: 'Gather requirements and outline the project goals.',
-    project: 'Brand identity refresh',
-    dueDate: '2026-11-02',
-    status: 'To Do'
-  },
-  {
-    id: 2,
-    name: 'Review launch checklist',
-    description: 'Confirm the remaining items before the campaign goes live.',
-    project: 'Q4 marketing site',
-    dueDate: '2026-11-05',
-    status: 'To Do'
-  },
-  {
-    id: 3,
-    name: 'Design dashboard wireframes',
-    description: 'Map the main screens for the client portal experience.',
-    project: 'Client portal redesign',
-    dueDate: '2026-10-30',
-    status: 'In Progress'
-  },
-  {
-    id: 4,
-    name: 'Create brand color palette',
-    description: 'Explore a flexible palette for digital and print use.',
-    project: 'Brand identity refresh',
-    dueDate: '2026-11-01',
-    status: 'In Progress'
-  },
-  {
-    id: 5,
-    name: 'Collect client feedback',
-    description: 'Summarize notes from the latest design review.',
-    project: 'Client portal redesign',
-    dueDate: '2026-10-26',
-    status: 'Done'
-  },
-  {
-    id: 6,
-    name: 'Draft homepage copy',
-    description: 'Prepare first-pass copy for the campaign homepage.',
-    project: 'Q4 marketing site',
-    dueDate: '2026-10-24',
-    status: 'Done'
-  }
-]
+onMounted(() => {
+  const localToday = new Date()
+  today.value = formatDateKey(localToday)
 
-const recentProjects: Project[] = projects.slice(0, 3)
+  const localNextWeek = new Date(localToday.getFullYear(), localToday.getMonth(), localToday.getDate())
+  localNextWeek.setDate(localNextWeek.getDate() + 7)
+  nextWeek.value = formatDateKey(localNextWeek)
+})
 
-const upcomingTasks: UpcomingTask[] = [
-  { name: 'Finalize homepage wireframes', project: 'Client portal redesign', dueDate: 'Today' },
-  { name: 'Review logo concepts', project: 'Brand identity refresh', dueDate: 'Tomorrow' },
-  { name: 'Prepare launch checklist', project: 'Q4 marketing site', dueDate: 'Oct 30' }
-]
-
-const today = new Date().toISOString().slice(0, 10)
-const nextWeekDate = new Date(today + 'T00:00:00.000Z')
-nextWeekDate.setUTCDate(nextWeekDate.getUTCDate() + 7)
-const nextWeek = nextWeekDate.toISOString().slice(0, 10)
-
-const totalProjects = computed(() => projects.length)
-const openTasks = computed(() => tasks.filter(task => task.status !== 'Done').length)
-const overdueTasks = computed(() => tasks.filter(task => task.status !== 'Done' && task.dueDate < today).length)
-const upcomingDeadlines = computed(() => tasks.filter(task =>
+const totalProjects = computed(() => projects.value.length)
+const openTasks = computed(() => tasks.value.filter(task => task.status !== 'Done').length)
+const overdueTasks = computed(() => tasks.value.filter(task =>
   task.status !== 'Done'
-  && task.dueDate >= today
-  && task.dueDate <= nextWeek
+  && today.value !== ''
+  && task.dueDate < today.value
 ).length)
+const upcomingTasks = computed(() => tasks.value
+  .filter(task =>
+    task.status !== 'Done'
+    && today.value !== ''
+    && task.dueDate >= today.value
+    && task.dueDate <= nextWeek.value
+  )
+  .sort((firstTask, secondTask) => firstTask.dueDate.localeCompare(secondTask.dueDate))
+  .slice(0, 3))
+const upcomingDeadlines = computed(() => tasks.value.filter(task =>
+  task.status !== 'Done'
+  && today.value !== ''
+  && task.dueDate >= today.value
+  && task.dueDate <= nextWeek.value
+).length)
+const recentProjects = computed(() => projects.value.slice(0, 3))
 </script>
 
 <template>
@@ -248,10 +179,13 @@ const upcomingDeadlines = computed(() => tasks.filter(task =>
           </div>
         </template>
 
-        <ul class="divide-y divide-default">
+        <ul
+          v-if="recentProjects.length > 0"
+          class="divide-y divide-default"
+        >
           <li
             v-for="project in recentProjects"
-            :key="project.name"
+            :key="project.id"
             class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
           >
             <div class="flex min-w-0 items-center gap-3">
@@ -263,7 +197,7 @@ const upcomingDeadlines = computed(() => tasks.filter(task =>
               <span class="truncate text-sm font-medium text-highlighted">{{ project.name }}</span>
             </div>
             <UBadge
-              :color="project.statusColor"
+              :color="projectStatusColors[project.status]"
               variant="subtle"
               class="shrink-0"
             >
@@ -271,6 +205,12 @@ const upcomingDeadlines = computed(() => tasks.filter(task =>
             </UBadge>
           </li>
         </ul>
+        <p
+          v-else
+          class="py-3 text-sm text-muted"
+        >
+          No projects yet. Create a project to see it here.
+        </p>
       </UCard>
 
       <UCard class="border border-default shadow-sm">
@@ -290,10 +230,13 @@ const upcomingDeadlines = computed(() => tasks.filter(task =>
           </div>
         </template>
 
-        <ul class="divide-y divide-default">
+        <ul
+          v-if="upcomingTasks.length > 0"
+          class="divide-y divide-default"
+        >
           <li
             v-for="task in upcomingTasks"
-            :key="task.name"
+            :key="task.id"
             class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
           >
             <div class="min-w-0">
@@ -301,12 +244,23 @@ const upcomingDeadlines = computed(() => tasks.filter(task =>
                 {{ task.name }}
               </p>
               <p class="mt-1 truncate text-xs text-muted">
-                {{ task.project }}
+                {{ getProjectName(task.projectId) }}
               </p>
             </div>
-            <time class="shrink-0 text-sm text-muted">{{ task.dueDate }}</time>
+            <time
+              :datetime="task.dueDate"
+              class="shrink-0 text-sm text-muted"
+            >
+              {{ formatDate(task.dueDate) }}
+            </time>
           </li>
         </ul>
+        <p
+          v-else
+          class="py-3 text-sm text-muted"
+        >
+          No upcoming tasks in the next 7 days.
+        </p>
       </UCard>
     </div>
   </div>
