@@ -3,17 +3,11 @@ import Draggable from 'vuedraggable'
 import { parseDate, type DateValue } from '@internationalized/date'
 import { computed, reactive, ref, watch } from 'vue'
 
-type TaskStatus = 'To Do' | 'In Progress' | 'Done'
-type StatusColor = 'neutral' | 'info' | 'success'
+import type { TaskInput } from '~/composables/useTasks'
 
-interface Task {
-  id: number
-  name: string
-  description: string
-  project: string
-  dueDate: string
-  status: TaskStatus
-}
+import type { Task, TaskStatus } from '~/types/task'
+
+type StatusColor = 'neutral' | 'info' | 'success'
 
 interface TaskColumn {
   id: string
@@ -32,6 +26,7 @@ interface SortableChangeEvent {
   }
 }
 
+const { projects, tasks, createTask, updateTask, deleteTask, updateTaskStatus: updateTaskStatusOperation } = useTasks()
 const searchQuery = ref('')
 const activeMobileStatus = ref<TaskStatus>('To Do')
 const draggedTaskId = ref<number | null>(null)
@@ -51,7 +46,7 @@ const touchedTaskFields = reactive({ name: false, project: false, dueDate: false
 const taskForm = reactive({
   name: '',
   description: '',
-  project: '',
+  projectId: undefined as number | undefined,
   dueDate: '',
   status: 'To Do' as TaskStatus
 })
@@ -85,9 +80,14 @@ const statusDotClasses: Record<TaskStatus, string> = {
   'Done': 'bg-success'
 }
 
-const projectOptions = computed(() => [...new Set(tasks.value.map(task => task.project))])
-const projectSelectOptions = computed(() => projectOptions.value.map(project => ({ label: project, value: project })))
+const projectSelectOptions = computed(() => projects.value.map(project => ({
+  label: project.name,
+  value: project.id
+})))
 
+function getProjectName(projectId: number) {
+  return projects.value.find(project => project.id === projectId)?.name ?? 'Unknown project'
+}
 const taskDueDateCalendarValue = computed<DateValue | undefined>({
   get: () => taskForm.dueDate ? parseDate(taskForm.dueDate) : undefined,
   set: (date) => {
@@ -99,7 +99,7 @@ const taskDueDateCalendarValue = computed<DateValue | undefined>({
 
 const taskFormErrors = computed(() => ({
   name: taskForm.name.trim() ? '' : 'Enter a task name.',
-  project: projectOptions.value.includes(taskForm.project) ? '' : 'Choose a project.',
+  project: projects.value.some(project => project.id === taskForm.projectId) ? '' : 'Choose a project.',
   dueDate: taskForm.dueDate ? '' : 'Choose a due date.'
 }))
 
@@ -113,7 +113,7 @@ function resetTaskForm() {
   editingTaskId.value = null
   taskForm.name = ''
   taskForm.description = ''
-  taskForm.project = ''
+  taskForm.projectId = undefined
   taskForm.dueDate = ''
   taskForm.status = 'To Do'
   touchedTaskFields.name = false
@@ -134,7 +134,7 @@ function openEditTask(task: Task) {
   editingTaskId.value = task.id
   taskForm.name = task.name
   taskForm.description = task.description
-  taskForm.project = task.project
+  taskForm.projectId = task.projectId
   taskForm.dueDate = task.dueDate
   taskForm.status = task.status
   isTaskModalOpen.value = true
@@ -143,56 +143,57 @@ function openEditTask(task: Task) {
 function submitTask() {
   hasAttemptedTaskSubmit.value = true
 
-  if (!isTaskFormValid.value || isTaskSubmitting.value) {
+  const selectedProjectId = taskForm.projectId
+
+  if (!isTaskFormValid.value || isTaskSubmitting.value || selectedProjectId === undefined) {
     return
   }
 
   isTaskSubmitting.value = true
 
   try {
-    const taskData = {
+    const editingId = editingTaskId.value
+    const taskData: TaskInput = {
       name: taskForm.name.trim(),
       description: taskForm.description.trim(),
-      project: taskForm.project,
+      projectId: selectedProjectId,
       dueDate: taskForm.dueDate,
       status: taskForm.status
     }
+    const result = editingId !== null
+      ? updateTask(editingId, taskData)
+      : createTask(taskData)
 
-    if (editingTaskId.value !== null) {
-      const task = tasks.value.find(existingTask => existingTask.id === editingTaskId.value)
-
-      if (!task) {
-        throw new Error('The task no longer exists.')
-      }
-
-      Object.assign(task, taskData)
-      activeMobileStatus.value = task.status
-
-      const query = searchQuery.value.trim().toLowerCase()
-      if (query && !task.name.toLowerCase().includes(query)) {
-        searchQuery.value = ''
-      }
-
-      isTaskModalOpen.value = false
+    if (!result.success) {
       toast.add({
-        title: 'Task updated',
-        description: task.name + ' was updated successfully.',
-        color: 'success'
+        title: result.reason === 'not-found'
+          ? 'Task could not be updated'
+          : isEditingTask.value ? 'Task could not be updated' : 'Task could not be created',
+        description: result.reason === 'not-found'
+          ? 'This task is no longer available in the list.'
+          : result.reason === 'invalid-project'
+            ? 'The selected project is no longer available. Choose a project and try again.'
+            : 'Please review the task details and try again.',
+        color: 'error'
       })
       return
     }
 
-    const task: Task = {
-      id: Math.max(0, ...tasks.value.map(existingTask => existingTask.id)) + 1,
-      ...taskData
+    const task = result.data
+    const isEditing = editingId !== null
+    activeMobileStatus.value = task.status
+
+    if (isEditing) {
+      const query = searchQuery.value.trim().toLowerCase()
+      if (query && !task.name.toLowerCase().includes(query)) {
+        searchQuery.value = ''
+      }
     }
 
-    tasks.value.unshift(task)
-    activeMobileStatus.value = task.status
     isTaskModalOpen.value = false
     toast.add({
-      title: 'Task created',
-      description: task.name + ' was created successfully.',
+      title: isEditing ? 'Task updated' : 'Task created',
+      description: task.name + (isEditing ? ' was updated successfully.' : ' was created successfully.'),
       color: 'success'
     })
   } catch {
@@ -229,9 +230,9 @@ function confirmDeleteTask() {
     return
   }
 
-  const task = tasks.value.find(currentTask => currentTask.id === taskId)
+  const result = deleteTask(taskId)
 
-  if (!task) {
+  if (!result.success) {
     cancelDeleteTask()
     toast.add({
       title: 'Task could not be deleted',
@@ -241,7 +242,7 @@ function confirmDeleteTask() {
     return
   }
 
-  tasks.value = tasks.value.filter(currentTask => currentTask.id !== taskId)
+  const { task } = result.data
   cancelDeleteTask()
   toast.add({
     title: 'Task deleted',
@@ -255,57 +256,6 @@ watch(isDeleteTaskConfirmationOpen, (isOpen) => {
     taskToDeleteId.value = null
   }
 })
-const tasks = ref<Task[]>([
-  {
-    id: 1,
-    name: 'Prepare project brief',
-    description: 'Gather requirements and outline the project goals.',
-    project: 'Brand identity refresh',
-    dueDate: '2026-11-02',
-    status: 'To Do'
-  },
-  {
-    id: 2,
-    name: 'Review launch checklist',
-    description: 'Confirm the remaining items before the campaign goes live.',
-    project: 'Q4 marketing site',
-    dueDate: '2026-11-05',
-    status: 'To Do'
-  },
-  {
-    id: 3,
-    name: 'Design dashboard wireframes',
-    description: 'Map the main screens for the client portal experience.',
-    project: 'Client portal redesign',
-    dueDate: '2026-10-30',
-    status: 'In Progress'
-  },
-  {
-    id: 4,
-    name: 'Create brand color palette',
-    description: 'Explore a flexible palette for digital and print use.',
-    project: 'Brand identity refresh',
-    dueDate: '2026-11-01',
-    status: 'In Progress'
-  },
-  {
-    id: 5,
-    name: 'Collect client feedback',
-    description: 'Summarize notes from the latest design review.',
-    project: 'Client portal redesign',
-    dueDate: '2026-10-26',
-    status: 'Done'
-  },
-  {
-    id: 6,
-    name: 'Draft homepage copy',
-    description: 'Prepare first-pass copy for the campaign homepage.',
-    project: 'Q4 marketing site',
-    dueDate: '2026-10-24',
-    status: 'Done'
-  }
-])
-
 const taskToDelete = computed(() => taskToDeleteId.value === null
   ? null
   : tasks.value.find(task => task.id === taskToDeleteId.value) ?? null)
@@ -369,19 +319,13 @@ function showStatusUpdateError() {
 }
 
 function updateTaskStatus(taskId: number, status: string) {
-  const task = tasks.value.find(item => item.id === taskId)
-
-  if (!task || !isTaskStatus(status)) {
-    showStatusUpdateError()
-    return
-  }
-
-  const previousStatus = task.status
-
   try {
-    task.status = status
+    const result = updateTaskStatusOperation(taskId, status)
+
+    if (!result.success) {
+      showStatusUpdateError()
+    }
   } catch {
-    task.status = previousStatus
     showStatusUpdateError()
   }
 }
@@ -584,7 +528,7 @@ function handleDragEnd() {
                       class="size-4 shrink-0"
                       aria-hidden="true"
                     />
-                    <span class="truncate">{{ task.project }}</span>
+                    <span class="truncate">{{ getProjectName(task.projectId) }}</span>
                   </span>
                   <time
                     :datetime="task.dueDate"
@@ -725,7 +669,7 @@ function handleDragEnd() {
                     class="size-4 shrink-0"
                     aria-hidden="true"
                   />
-                  <span class="truncate">{{ task.project }}</span>
+                  <span class="truncate">{{ getProjectName(task.projectId) }}</span>
                 </span>
                 <time
                   :datetime="task.dueDate"
@@ -837,7 +781,7 @@ function handleDragEnd() {
             </label>
             <USelect
               id="task-project"
-              v-model="taskForm.project"
+              v-model="taskForm.projectId"
               :items="projectSelectOptions"
               placeholder="Select a project"
               required
