@@ -22,7 +22,7 @@ const projectStatusColors: Record<ProjectStatus, 'primary' | 'warning' | 'neutra
 function isProjectStatus(status: string): status is ProjectStatus {
   return projectStatusOptions.some(option => option.value === status)
 }
-const { projects, tasks } = useTaskFlowData()
+const { projects, createProject: createProjectRecord, updateProject, deleteProject } = useProjects()
 const toast = useToast()
 const searchQuery = ref('')
 const isCreateModalOpen = ref(false)
@@ -172,11 +172,21 @@ function confirmDeleteProject() {
     return
   }
 
-  const associatedTaskCount = tasks.value.filter(task => task.projectId === project.id).length
-  projects.value = projects.value.filter(currentProject => currentProject.id !== project.id)
-  tasks.value = tasks.value.filter(task => task.projectId !== project.id)
+  const result = deleteProject(project.id)
 
-  if (editingProjectId.value === project.id) {
+  if (!result.success) {
+    cancelDeleteProject()
+    toast.add({
+      title: 'Project could not be deleted',
+      description: 'This project is no longer available in the list.',
+      color: 'error'
+    })
+    return
+  }
+
+  const { project: deletedProject, deletedTaskCount } = result.data
+
+  if (editingProjectId.value === deletedProject.id) {
     isCreateModalOpen.value = false
     resetProjectForm()
   }
@@ -184,9 +194,9 @@ function confirmDeleteProject() {
   cancelDeleteProject()
   toast.add({
     title: 'Project deleted',
-    description: associatedTaskCount > 0
-      ? project.name + ' and its ' + associatedTaskCount + ' associated task(s) were deleted successfully.'
-      : project.name + ' was deleted successfully.',
+    description: deletedTaskCount > 0
+      ? deletedProject.name + ' and its ' + deletedTaskCount + ' associated task(s) were deleted successfully.'
+      : deletedProject.name + ' was deleted successfully.',
     color: 'success'
   })
 }
@@ -214,46 +224,42 @@ async function createProject() {
   await nextTick()
 
   try {
-    const isEditing = editingProjectId.value !== null
-    const projectName = projectForm.name.trim()
+    const editingId = editingProjectId.value
+    const input = {
+      name: projectForm.name.trim(),
+      description: projectForm.description.trim(),
+      status: selectedStatus,
+      startDate: projectForm.startDate,
+      endDate: projectForm.endDate
+    }
+    const result = editingId !== null
+      ? updateProject(editingId, input)
+      : createProjectRecord(input)
 
-    if (editingProjectId.value !== null) {
-      const project = projects.value.find(project => project.id === editingProjectId.value)
-
-      if (!project) {
-        return
-      }
-
-      Object.assign(project, {
-        name: projectForm.name.trim(),
-        description: projectForm.description.trim(),
-        status: selectedStatus,
-        startDate: projectForm.startDate,
-        endDate: projectForm.endDate
+    if (!result.success) {
+      toast.add({
+        title: result.reason === 'not-found' ? 'Project could not be updated' : 'Project could not be saved',
+        description: result.reason === 'not-found'
+          ? 'This project is no longer available in the list.'
+          : 'Please review the project details and try again.',
+        color: 'error'
       })
+      return
+    }
 
-      const query = searchQuery.value.trim().toLowerCase()
-      if (query && !project.name.toLowerCase().includes(query)) {
-        searchQuery.value = ''
-      }
-    } else {
-      const nextId = Math.max(0, ...projects.value.map(project => project.id)) + 1
+    const project = result.data
+    const isEditing = editingId !== null
+    const query = searchQuery.value.trim().toLowerCase()
 
-      projects.value.unshift({
-        id: nextId,
-        name: projectForm.name.trim(),
-        description: projectForm.description.trim(),
-        status: selectedStatus,
-        startDate: projectForm.startDate,
-        endDate: projectForm.endDate
-      })
+    if (isEditing && query && !project.name.toLowerCase().includes(query)) {
+      searchQuery.value = ''
     }
 
     isCreateModalOpen.value = false
     resetProjectForm()
     toast.add({
       title: isEditing ? 'Project updated' : 'Project created',
-      description: projectName + (isEditing ? ' was updated successfully.' : ' was created successfully.'),
+      description: project.name + (isEditing ? ' was updated successfully.' : ' was created successfully.'),
       color: 'success'
     })
   } finally {

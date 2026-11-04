@@ -3,6 +3,8 @@ import Draggable from 'vuedraggable'
 import { parseDate, type DateValue } from '@internationalized/date'
 import { computed, reactive, ref, watch } from 'vue'
 
+import type { TaskInput } from '~/composables/useTasks'
+
 import type { Task, TaskStatus } from '~/types/task'
 
 type StatusColor = 'neutral' | 'info' | 'success'
@@ -24,7 +26,7 @@ interface SortableChangeEvent {
   }
 }
 
-const { projects, tasks } = useTaskFlowData()
+const { projects, tasks, createTask, updateTask, deleteTask, updateTaskStatus: updateTaskStatusOperation } = useTasks()
 const searchQuery = ref('')
 const activeMobileStatus = ref<TaskStatus>('To Do')
 const draggedTaskId = ref<number | null>(null)
@@ -143,56 +145,55 @@ function submitTask() {
 
   const selectedProjectId = taskForm.projectId
 
-  if (!isTaskFormValid.value || isTaskSubmitting.value || selectedProjectId === undefined || !projects.value.some(project => project.id === selectedProjectId)) {
+  if (!isTaskFormValid.value || isTaskSubmitting.value || selectedProjectId === undefined) {
     return
   }
 
   isTaskSubmitting.value = true
 
   try {
-    const taskData = {
+    const editingId = editingTaskId.value
+    const taskData: TaskInput = {
       name: taskForm.name.trim(),
       description: taskForm.description.trim(),
       projectId: selectedProjectId,
       dueDate: taskForm.dueDate,
       status: taskForm.status
     }
+    const result = editingId !== null
+      ? updateTask(editingId, taskData)
+      : createTask(taskData)
 
-    if (editingTaskId.value !== null) {
-      const task = tasks.value.find(existingTask => existingTask.id === editingTaskId.value)
-
-      if (!task) {
-        throw new Error('The task no longer exists.')
-      }
-
-      Object.assign(task, taskData)
-      activeMobileStatus.value = task.status
-
-      const query = searchQuery.value.trim().toLowerCase()
-      if (query && !task.name.toLowerCase().includes(query)) {
-        searchQuery.value = ''
-      }
-
-      isTaskModalOpen.value = false
+    if (!result.success) {
       toast.add({
-        title: 'Task updated',
-        description: task.name + ' was updated successfully.',
-        color: 'success'
+        title: result.reason === 'not-found'
+          ? 'Task could not be updated'
+          : isEditingTask.value ? 'Task could not be updated' : 'Task could not be created',
+        description: result.reason === 'not-found'
+          ? 'This task is no longer available in the list.'
+          : result.reason === 'invalid-project'
+            ? 'The selected project is no longer available. Choose a project and try again.'
+            : 'Please review the task details and try again.',
+        color: 'error'
       })
       return
     }
 
-    const task: Task = {
-      id: Math.max(0, ...tasks.value.map(existingTask => existingTask.id)) + 1,
-      ...taskData
+    const task = result.data
+    const isEditing = editingId !== null
+    activeMobileStatus.value = task.status
+
+    if (isEditing) {
+      const query = searchQuery.value.trim().toLowerCase()
+      if (query && !task.name.toLowerCase().includes(query)) {
+        searchQuery.value = ''
+      }
     }
 
-    tasks.value.unshift(task)
-    activeMobileStatus.value = task.status
     isTaskModalOpen.value = false
     toast.add({
-      title: 'Task created',
-      description: task.name + ' was created successfully.',
+      title: isEditing ? 'Task updated' : 'Task created',
+      description: task.name + (isEditing ? ' was updated successfully.' : ' was created successfully.'),
       color: 'success'
     })
   } catch {
@@ -229,9 +230,9 @@ function confirmDeleteTask() {
     return
   }
 
-  const task = tasks.value.find(currentTask => currentTask.id === taskId)
+  const result = deleteTask(taskId)
 
-  if (!task) {
+  if (!result.success) {
     cancelDeleteTask()
     toast.add({
       title: 'Task could not be deleted',
@@ -241,7 +242,7 @@ function confirmDeleteTask() {
     return
   }
 
-  tasks.value = tasks.value.filter(currentTask => currentTask.id !== taskId)
+  const { task } = result.data
   cancelDeleteTask()
   toast.add({
     title: 'Task deleted',
@@ -318,19 +319,13 @@ function showStatusUpdateError() {
 }
 
 function updateTaskStatus(taskId: number, status: string) {
-  const task = tasks.value.find(item => item.id === taskId)
-
-  if (!task || !isTaskStatus(status)) {
-    showStatusUpdateError()
-    return
-  }
-
-  const previousStatus = task.status
-
   try {
-    task.status = status
+    const result = updateTaskStatusOperation(taskId, status)
+
+    if (!result.success) {
+      showStatusUpdateError()
+    }
   } catch {
-    task.status = previousStatus
     showStatusUpdateError()
   }
 }
